@@ -4,6 +4,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import HTTPException
 from typing import Optional, Dict, List
+from schema import ClaimExtract, ClaimQARequest
 import uuid
 
 from dotenv import load_dotenv
@@ -42,3 +43,14 @@ def extract_ocr(document: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid document type. Only JPEG, JPG, PNG, and PDF are supported.")
     
     return 
+
+
+@app.post("/ask", tags=["Question Answering"])
+def ask_question(request: ClaimQARequest):
+    document_id = request.document_id
+    question = request.question
+
+    if document_id not in temp_storage:
+        raise HTTPException(status_code=404, detail="Document ID not found.")
+
+    return
