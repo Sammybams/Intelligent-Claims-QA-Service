@@ -4,3 +4,5 @@
 *share/
 *.DS_Store
 *pyvenv.cfg
+*.env
+Sample_Claims_Images/
