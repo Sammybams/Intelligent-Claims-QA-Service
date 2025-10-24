@@ -7,3 +7,7 @@
 *.env
 *__pycache__/
 Sample_Claims_Images/
+*.pdf
+*.jpeg
+*.jpg
+*.png
