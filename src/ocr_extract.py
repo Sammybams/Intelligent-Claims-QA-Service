@@ -1,9 +1,13 @@
 import os
 
+# Import Azure Document Intelligence client
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeOutputOption, AnalyzeResult
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+
+# Import Azure OpenAI client
+from openai import AzureOpenAI
 
 from dotenv import load_dotenv
 
@@ -28,7 +32,6 @@ def make_pdf_searchable(doc: bytes, document_id: str):
     
     document_intelligence_client = DocumentIntelligenceClient(endpoint=ENDPOINT, credential=AzureKeyCredential(KEY))
 
-
     poller = document_intelligence_client.begin_analyze_document(
         "prebuilt-read",
         AnalyzeDocumentRequest(bytes_source=doc),
@@ -37,7 +40,6 @@ def make_pdf_searchable(doc: bytes, document_id: str):
 
     result: AnalyzeResult = poller.result()
     operation_id = poller.details["operation_id"]
-
 
     response = document_intelligence_client.get_analyze_result_pdf(model_id=result.model_id, result_id=operation_id)
     with open(f"{document_id}.pdf", "wb") as writer:

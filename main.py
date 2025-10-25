@@ -8,6 +8,9 @@ from fastapi.responses import JSONResponse
 from typing import Optional, Dict, List
 from schema import ClaimExtract, ClaimQARequest
 from src.ocr_extract import make_pdf_searchable
+
+# Import Functions and Models
+from src.llm_extract import structure_ocr_extraction
 import json
 import uuid
 
@@ -59,12 +62,17 @@ async def extract_ocr(document: UploadFile = File(...)):
     unique_document_id = str(uuid.uuid4()) # Unique ID document using uuid
     searchable_pdf = make_pdf_searchable(doc_bytes, unique_document_id)
 
+    result = structure_ocr_extraction(searchable_pdf)
+    # print(result)
+
+
     new_extract = ClaimExtract(
         document_id = unique_document_id,
-        content = {}
+        # Load string-like json as JSON
+        content = json.loads(result)
     )
     temp_storage[unique_document_id] = new_extract.dict()
-    return 
+    return new_extract
 
 
 @app.post("/ask", tags=["Question Answering"])

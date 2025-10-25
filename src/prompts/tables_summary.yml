@@ -1,0 +1,28 @@
+name: table_in_claims
+description: >
+  Convert a single table (columns + rows) into an array of medication objects.
+placeholders:
+  TABLE_ID_PREFIX: "claims_table"
+prompt: |
+  Input: table columns and rows.
+  Output: JSON object:
+    {
+      "table_id": "<{{TABLE_ID_PREFIX}}>_<uuid>",
+      "medications": [
+        {
+          "row_id": "row_1",
+          "name": "Doxycycline",
+          "dosage": "100mg",
+          "form": "tablet",
+          "quantity": "1",
+          "unit_price": 3000.0,
+          "total_price": 3000.0,
+          "confidence": 0.92,
+          "source": "table_row",
+          "raw_text_excerpt": "row text..."
+        }
+      ]
+    }
+  - Normalize numeric fields; remove currency symbols for numeric fields but keep currency symbol in the top-level billing summary.
+  - Use deterministic row ids: row_1 ... row_N.
+  - Always return JSON only.
