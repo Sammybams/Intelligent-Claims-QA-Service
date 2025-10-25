@@ -7,3 +7,7 @@ class ClaimExtract(BaseModel):
 class ClaimQARequest(BaseModel):
     document_id: str
     question: str
+
+
+class ClaimQAResponse(BaseModel):
+    answer: str

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional, Dict, List
 from schema import ClaimExtract, ClaimQARequest
 from src.ocr_extract import make_pdf_searchable
+from src.claims_qa import structure_claims_qa
 
 # Import Functions and Models
 from src.llm_extract import structure_ocr_extraction
@@ -51,7 +52,15 @@ async def extract_history():
 # OCR Extraction Endpoint
 @app.post("/extract", tags=["OCR Extraction"])
 async def extract_ocr(document: UploadFile = File(...)):
+    """
+    Handles an OCR extraction request.
 
+    Args:
+        document (UploadFile): The uploaded document file.
+
+    Returns:
+        ClaimExtract: The structured claim extraction result.
+    """
     # Verify if document is image or pdf
     if document.content_type not in ["image/jpeg", "image/jpg", "image/png", "application/pdf"]:
         raise HTTPException(status_code=400, detail="Invalid document type. Only JPEG, JPG, PNG, and PDF are supported.")
@@ -72,15 +81,31 @@ async def extract_ocr(document: UploadFile = File(...)):
         content = json.loads(result)
     )
     temp_storage[unique_document_id] = new_extract.dict()
+
+    # Delete the temporary searchable PDF file
+    os.remove(searchable_pdf)
     return new_extract
 
 
 @app.post("/ask", tags=["Question Answering"])
 async def ask_question(request: ClaimQARequest):
+    """
+    Handles a question answering request.
+    Args:
+        request (ClaimQARequest): The question answering request containing document ID and question.
+
+    Returns:
+        dict: The answer to the question.
+    """
     document_id = request.document_id
     question = request.question
 
     if document_id not in temp_storage:
         raise HTTPException(status_code=404, detail="Document ID not found.")
+    
+    document_content = temp_storage[document_id]
+    # Convert to string for LLM input
 
-    return
+    answer = structure_claims_qa(str(document_content), question)
+
+    return {"answer": answer}

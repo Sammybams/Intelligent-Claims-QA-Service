@@ -1,6 +1,6 @@
 import os
 import base64
-import yaml, json, uuid, datetime, re
+import yaml
 from pathlib import Path
 
 from src.functions import extract_function
@@ -30,7 +30,7 @@ def encode_doc(file_path):
     with open(file_path, "rb") as document_file:
         return base64.b64encode(document_file.read()).decode("utf-8")
 
-
+# Function to load the prompt template
 def load_prompt():
     path = "src/prompts/claims_summary.yml"
     subs = {
@@ -43,7 +43,17 @@ def load_prompt():
     return t
 
 
+
 def structure_ocr_extraction(file_path: str):
+    """
+    Structures the OCR extraction from a document into a defined JSON format using Azure OpenAI.
+    Args:
+        file_path (str): The path to the document file.
+
+    Returns:
+        str: The structured JSON output as a string.
+    """
+    
     user_prompt = load_prompt()
     base64_doc = encode_doc(file_path)
     # file_type = Path(file_path).suffix.lower()

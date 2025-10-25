@@ -1,3 +1,21 @@
+claims_qa_response = {
+  "format": {
+    "type": "json_schema",
+    "name": "simple_answer",
+    "strict": True,
+    "schema": {
+      "title": "simple_answer",
+      "description": "A simple response with a single string answer.",
+      "type": "object",
+      "properties": {
+        "answer": { "type": "string" }
+      },
+      "required": ["answer"],
+      "additionalProperties": False
+    }
+  }
+}
+
 extract_function = {
   "format": {
     "type": "json_schema",
@@ -71,8 +89,11 @@ extract_function = {
             "type": "object",
             "properties": {
               "name": { "type": "string" },
+              "quantity": { "type": "string" },
+              "unit_price": { "type": "number" },
+              "total_price": { "type": "number" },
             },
-            "required": ["name"],
+            "required": ["name", "quantity", "unit_price", "total_price"],
             "additionalProperties": False
           }
         },
