@@ -63,8 +63,7 @@ This repository demonstrates a production-minded pipeline that uses **Azure Docu
      - `raw_text` (paragraphs/lines),  
      - `key_value_pairs` (extracted kv pairs & confidence),  
      - `tables` (header cells and rows),  
-     - optionally export a searchable PDF (recommended for archiving and human review).  
-   - Save this analyzer output as `ocr_extract_base`.
+     - export a searchable PDF (recommended for archiving and human review).  
 
 3. **Normalize**  
    - Transform Azure results into a smaller, stable context for the LLM:
@@ -74,7 +73,7 @@ This repository demonstrates a production-minded pipeline that uses **Azure Docu
 4. **Structured extraction (LLM)**  
    - Load your JSON Schema (generated from Pydantic or hand-written).
    - Sanitize the schema to satisfy OpenAI strict rules (see below).
-   - Call the LLM with `text_format` = `{ "type": "json_schema", "schema": <sanitized_schema> }` (or register a function for function-calling).
+   - Call the LLM with Structured Output with a defined schema.
    - The model returns a structured `claims_summary` JSON that matches the schema.
 
 5. **Validation & persistence**  
