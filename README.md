@@ -1,90 +1,169 @@
 # Intelligent Claims QA Service
 
-A small, focused service that converts scanned/photographed medical/insurance claim documents into a structured JSON representation and answers natural-language questions about those claims.  
-This project uses **Azure Document Intelligence** to make documents searchable/structured and **OpenAI function-calling / structured output** to produce and validate the final JSON and handle question answering.
+Convert scanned/ photographed medical / insurance claim documents into a structured JSON representation and answer natural-language questions about those claims — **only** using the extracted data.  
+This repository demonstrates a production-minded pipeline that uses **Azure Document Intelligence** to make scanned documents searchable and an LLM (OpenAI / Azure OpenAI) with **schema-first structured output** to extract validated claims data and run question-answering on the structured extract.
 
 ---
 
 ## Table of contents
 
-- [Overview](#overview)  
-- [Design & Approach](#design--approach)  
-  - [1) Make documents searchable](#1-make-documents-searchable)  
-  - [2) Structured extraction (Schema-driven)](#2-structured-extraction-schema-driven)  
-  - [3) Question answering over structured output](#3-question-answering-over-structured-output)  
-- [Schema & strict JSON requirements (OpenAI)](#schema--strict-json-requirements-openai)  
-- [Repository structure (observed)](#repository-structure-observed)  
-- [How to run (local)](#how-to-run-local)  
-- [Examples & prompts](#examples--prompts)  
-- [Troubleshooting & tips](#troubleshooting--tips)  
-- [Next steps & improvements](#next-steps--improvements)
+- [Why this design?](#why-this-design)  
+- [High-level architecture](#high-level-architecture)  
+- [Pipeline: step-by-step](#pipeline-step-by-step)  
+- [Schema & OpenAI strict JSON rules](#schema--openai-strict-json-rules)  
+- [Repository structure](#repository-structure)  
+- [Run locally (quick start)](#run-locally-quick-start)  
+- [API / Try it (Swagger UI)](#api--try-it-swagger-ui)  
+- [Examples](#examples)  
+- [Prompts & YAML snippets](#prompts--yaml-snippets)  
+- [Sanitizer & Pydantic tips (schema generation)](#sanitizer--pydantic-tips)  
+- [Troubleshooting & FAQ](#troubleshooting--faq)  
+- [Next steps & improvements](#next-steps--improvements)  
+- [Contributing & License](#contributing--license)
 
 ---
 
-## Overview
+## Why this design?
 
-This service processes claims documents (including photo-scanned PDFs) into a normalized JSON representation and answers reviewer or user questions only from that extracted data — no hallucinations. The pipeline aims to be:
-
-- **Accurate**: use Azure Document Intelligence to extract text, key-value pairs and tables.  
-- **Deterministic**: schema-first extraction so downstream systems can validate automatically.  
-- **Auditable**: every value includes a `confidence`, a `source` and `raw_text_excerpt` where possible.  
-- **Safe for structured output**: JSON Schema crafted to meet OpenAI's `json_schema` strict rules (every object node must provide `additionalProperties` and `required` listing property keys).
+- **Scanned documents are common.** Many claims arrive as photos or scanned PDFs where text is not selectable. Off-the-shelf LLMs perform poorly when asked to parse raw images or OCR blobs directly.
+- **Make documents readable for LLMs.** Azure Document Intelligence (Document Analyzer / Form Recognizer) converts image scans into structured outputs (text blocks, key-value pairs, and tables) and can produce a *searchable PDF* which preserves layout + searchable text. That searchable result is far easier and more reliable for LLMs to consume.
+- **Deterministic extraction with schema-first output.** Instead of free-text extraction, we drive the LLM to return a strict JSON schema (Pydantic / JSON Schema) so downstream systems can validate, store, or route the results programmatically with minimal manual review.
+- **QA only from extracted data.** The QA stage receives the structured JSON extract and the user question. The assistant is instructed to answer **only** from the extract and to reply `"I don't know"` if the extract lacks the information — eliminating hallucinations.
 
 ---
 
-## Design & Approach
+## High-level architecture
 
-### 1) Make documents searchable
+```
 
-- Use **Azure Document Intelligence** (Form Recognizer / Document Intelligence) to process documents and convert image scans into:
-  - `raw_text` (page/line/word),
-  - `kv_candidates` (key-value pairs),
-  - `tables` (array of column headers and rows),
-  - optional metadata (page numbers, confidence from Azure).
-- Store the document analysis as a JSON blob (this becomes the "ocr_extract" used by the rest of the pipeline).
+[PDF/Image upload] --> [Azure Document Intelligence]
+-> searchabled PDF + OCR output (text, kv_pairs, tables)
+-> saved as ocr_extract JSON
+--> [Normalizer] (format Azure output to LLM-friendly context)
+--> [LLM structured extraction]
+-> returns validated JSON (per schema)
+--> [QA agent]
+-> receives structured JSON + question -> returns short answer
 
-Why Azure DI? its layout/field/table extraction is robust on photo-scans and returns rich structure that makes later normalization far easier.
+```
 
-### 2) Structured extraction (Schema-driven)
-
-- Define a strict JSON schema / Pydantic model for the claims summary (top-level keys: `document_id`, `patient`, `demographics`, `diagnoses`, `medications`, `procedures`, `admission`, `vitals`, `labs`, `billing`, `tables`, `notes`, `metadata`, `warnings`, etc.).
-- Use an LLM (OpenAI) with **function-calling** or `text_format: { type: "json_schema" }` to ask the model to return **only** the structured JSON that matches the schema.
-- For maximum determinism with OpenAI’s strict validator:
-  - Ensure every object node that declares `properties` includes `additionalProperties` (explicit) and a `required` array listing the property keys (even if you'll accept `null` as values).
-  - If you use Pydantic to generate the schema, set `Config.extra = Extra.forbid` (pydantic v1) or `model_config={"extra":"forbid"}` (v2) and post-process the schema to add the `additionalProperties` / `required` keys where needed.
-  - Example sanitizer (used when generating the schema) ensures compatibility with OpenAI.
-
-**Important**: Table fields are represented as dictionaries keyed by table IDs (e.g. `table_1`) and each row has `row_id` and `cells`, where `cells` may contain dynamic column names and string values (the schema must explicitly allow `additionalProperties` for `cells` with a string value schema).
-
-### 3) Question answering over structured output
-
-- The QA component is **schema-driven**: instead of asking the LLM to read raw OCR text, pass the *structured JSON extract* (`ocr_extract`) and the user’s question.
-- The prompt instructs the model to answer **only from the extract**; if the information is not available, respond with `"I don't know"` or a short negative answer.
-- Optionally provide short-form or long-form QnA prompts. For production we recommend a **short-answer-only** prompt for direct answers in the language of the user.
+- Azure DI = best at handling photo-scans and generating searchable PDF + structured outputs.
+- LLM Extraction = uses `text_format: { type: "json_schema" }` or function-calling to return exact JSON matching the schema.
+- QA = small prompt that uses only the `ocr_extract` JSON (no external lookups).
 
 ---
 
-## Schema & strict JSON requirements (OpenAI)
+## Pipeline: step-by-step
 
-OpenAI `json_schema` strict mode enforces extra rules that are easy to trip over:
+1. **Upload Document (PDF / image)**  
+   - Accept a PDF or image upload through the API / UI.
 
-- Every `type: "object"` node that lists `properties` **must** include:
-  - `additionalProperties` (explicit; `false` or a permissive schema), and
-  - `required` — an array that lists the property keys declared in `properties`.
-- For nested maps with dynamic keys (e.g., `cells` inside a table row), include `additionalProperties: {"type":"string"}` and set `properties: {}` and `required: []`.
-- If you generate JSON Schema from Pydantic automatically, either:
-  - Use `Config.schema_extra` (Pydantic v1) hook to inject `additionalProperties: False` and `required` lists into the generated schema, or
-  - Post-process the generated schema with a small sanitizer function prior to sending to OpenAI.
+2. **Azure Document Intelligence**  
+   - Call the Document Analyzer to produce:
+     - `raw_text` (paragraphs/lines),  
+     - `key_value_pairs` (extracted kv pairs & confidence),  
+     - `tables` (header cells and rows),  
+     - optionally export a searchable PDF (recommended for archiving and human review).  
+   - Save this analyzer output as `ocr_extract_base`.
 
-**Repository Structure**
+3. **Normalize**  
+   - Transform Azure results into a smaller, stable context for the LLM:
+     - `kv_candidates`, trimmed `raw_text` excerpts, and table previews.
+     - Add page/line info where available.
+
+4. **Structured extraction (LLM)**  
+   - Load your JSON Schema (generated from Pydantic or hand-written).
+   - Sanitize the schema to satisfy OpenAI strict rules (see below).
+   - Call the LLM with `text_format` = `{ "type": "json_schema", "schema": <sanitized_schema> }` (or register a function for function-calling).
+   - The model returns a structured `claims_summary` JSON that matches the schema.
+
+5. **Validation & persistence**  
+   - Parse the model output with Pydantic (ensures types) and reject/flag low-confidence fields for human review.
+
+6. **Question Answering**  
+   - Provide the QA prompt with the validated `claims_summary` (structured JSON) and the user question.
+   - Model must answer only from `claims_summary`. If missing, respond `"I don't know"`.
+
+---
+
+## Schema & OpenAI strict JSON rules
+
+OpenAI strict `json_schema` (and some function-calling usage) requires:
+
+- **Every object node** that has `properties` must include:
+  - `"additionalProperties"` explicitly (commonly `false`), and  
+  - `"required"` — an array listing the property keys present in `properties`.
+- If you need dynamic keys (e.g., table `cells` with column names unknown in advance), set:
+  - `properties: {}` and `additionalProperties: { "type":"string" }` and `required: []` for that node.
+
+We recommend generating your schema from Pydantic and running a sanitizer that injects `additionalProperties` and correct `required` arrays for every object node before sending it to OpenAI.
+
+---
+
+## Repository structure
+
+```
 
 Intelligent-Claims-QA-Service/
-```
-├── README.md                  # (this file — suggested)
-├── main.py                    # main entry point for running a demo/service
-├── schema.py                  # Pydantic / schema definitions for claims endpoint requests
+├── README.md                  # (this file)
+├── main.py                    # main entry point for running the FastAPI demo/service
+├── schema.py                  # Pydantic / schema definitions for claims summary + sanitizer helpers
 ├── requirements.txt           # Python dependencies
 ├── .env.example               # example environment variables (keys for Azure, OpenAI)
-├── src/                       # (project source / helpers; Contains LLM/azure drivers)
-└── other files (experimentation notebooks, tests etc)
+├── src/                       # project source / helpers (LLM/azure connectors, utilities)
+└── tests/                     # unit tests (optional / recommended)
+
+````
+
+- `.env.example` already contains the sample keys layout. **Do not commit real secrets** — copy to `.env` and fill your real keys.
+
+---
+
+## Run locally (quick start)
+
+**Prerequisites**
+- Python 3.11+  
+- Virtual environment tooling (venv or conda)  
+- Azure + OpenAI credentials (if calling those services)
+
+**Install**
+```bash
+python -m venv .venv
+# macOS / Linux
+source .venv/bin/activate
+# Windows PowerShell
+# .\.venv\Scripts\Activate.ps1
+
+pip install --upgrade pip
+pip install -r requirements.txt
+````
+
+**Environment**
+
+```bash
+cp .env.example .env
+# Edit .env and fill in your actual keys:
+# AZURE_ENDPOINT=...
+# AZURE_KEY=...
+# OPENAI_API_KEY=...  OR
+# AZURE_OPENAI_KEY=... and AZURE_OPENAI_ENDPOINT=...
 ```
+
+**Start the app**
+
+```bash
+python -m uvicorn main:app --reload
+```
+
+**Open the docs**
+
+* Swagger UI: `http://127.0.0.1:8000/docs` — use this to interact with endpoints and try uploads/questions.
+
+---
+
+## API / Example endpoints
+
+> Exact paths depend on `main.py` implementation. Typical endpoints:
+
+* `POST /extract` — upload a PDF or image file; returns `ocr_extract` (Document Intelligence analyzer output + LLM normalized extract).
+* `POST /qa` — send `{ "document_id": <string>, "question": "<text>" }` and get back a short answer.
