@@ -79,6 +79,7 @@ OpenAI `json_schema` strict mode enforces extra rules that are easy to trip over
 **Repository Structure**
 
 Intelligent-Claims-QA-Service/
+
 ├── README.md                  # (this file — suggested)
 ├── main.py                    # main entry point for running a demo/service
 ├── schema.py                  # Pydantic / schema definitions for claims endpoint requests
